@@ -16,9 +16,10 @@
  */
 package org.apache.camel.component.hivemq;
 
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
-import com.hivemq.client.mqtt.mqtt5.Mqtt5AsyncClient;
+import com.hivemq.client.mqtt.MqttVersion;
 import org.apache.camel.impl.DefaultCamelContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,35 +46,70 @@ class HiveMQEndpointAuthTest {
     }
 
     @Test
-    @DisplayName("Username without password builds MQTT simple auth and does not NPE")
-    void usernameWithoutPasswordDoesNotThrow() {
+    @DisplayName("MQTT 5: username without password builds MQTT simple auth and does not NPE")
+    void mqtt5UsernameWithoutPasswordDoesNotThrow() {
         HiveMQConfiguration configuration = new HiveMQConfiguration();
+        configuration.setMqttVersion(MqttVersion.MQTT_5_0);
         configuration.setUsername("mqtt-user");
         configuration.setPassword(null);
 
-        HiveMQEndpoint endpoint = new HiveMQEndpoint("hivemq:test", component, configuration, "test");
-        Mqtt5AsyncClient client = endpoint.createClient();
+        Mqtt5ClientAdapter client = (Mqtt5ClientAdapter) createEndpoint(configuration).createClient();
 
-        assertThat(client.getConfig().getSimpleAuth()).isPresent();
-        assertThat(client.getConfig().getSimpleAuth().orElseThrow().getPassword()).isEmpty();
+        assertThat(client.getClient().getConfig().getSimpleAuth()).isPresent();
+        assertThat(client.getClient().getConfig().getSimpleAuth().orElseThrow().getPassword()).isEmpty();
     }
 
     @Test
-    @DisplayName("Username and password are both applied to MQTT simple auth")
-    void usernameWithPasswordSetsPassword() {
+    @DisplayName("MQTT 5: username and password are both applied to MQTT simple auth")
+    void mqtt5UsernameWithPasswordSetsPassword() {
         HiveMQConfiguration configuration = new HiveMQConfiguration();
+        configuration.setMqttVersion(MqttVersion.MQTT_5_0);
         configuration.setUsername("mqtt-user");
         configuration.setPassword("secret");
 
-        HiveMQEndpoint endpoint = new HiveMQEndpoint("hivemq:test", component, configuration, "test");
-        Mqtt5AsyncClient client = endpoint.createClient();
+        Mqtt5ClientAdapter client = (Mqtt5ClientAdapter) createEndpoint(configuration).createClient();
 
-        assertThat(client.getConfig().getSimpleAuth()).isPresent();
-        assertThat(client.getConfig().getSimpleAuth().orElseThrow().getPassword())
-                .hasValueSatisfying(buffer -> {
-                    byte[] bytes = new byte[buffer.remaining()];
-                    buffer.get(bytes);
-                    assertThat(bytes).isEqualTo("secret".getBytes(StandardCharsets.UTF_8));
-                });
+        assertThat(client.getClient().getConfig().getSimpleAuth()).isPresent();
+        assertThat(client.getClient().getConfig().getSimpleAuth().orElseThrow().getPassword())
+                .hasValueSatisfying(buffer -> assertThat(toBytes(buffer)).isEqualTo("secret".getBytes(StandardCharsets.UTF_8)));
+    }
+
+    @Test
+    @DisplayName("MQTT 3.1.1: username without password builds MQTT simple auth and does not NPE")
+    void mqtt311UsernameWithoutPasswordDoesNotThrow() {
+        HiveMQConfiguration configuration = new HiveMQConfiguration();
+        configuration.setMqttVersion(MqttVersion.MQTT_3_1_1);
+        configuration.setUsername("mqtt-user");
+        configuration.setPassword(null);
+
+        Mqtt3ClientAdapter client = (Mqtt3ClientAdapter) createEndpoint(configuration).createClient();
+
+        assertThat(client.getClient().getConfig().getSimpleAuth()).isPresent();
+        assertThat(client.getClient().getConfig().getSimpleAuth().orElseThrow().getPassword()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("MQTT 3.1.1: username and password are both applied to MQTT simple auth")
+    void mqtt311UsernameWithPasswordSetsPassword() {
+        HiveMQConfiguration configuration = new HiveMQConfiguration();
+        configuration.setMqttVersion(MqttVersion.MQTT_3_1_1);
+        configuration.setUsername("mqtt-user");
+        configuration.setPassword("secret");
+
+        Mqtt3ClientAdapter client = (Mqtt3ClientAdapter) createEndpoint(configuration).createClient();
+
+        assertThat(client.getClient().getConfig().getSimpleAuth()).isPresent();
+        assertThat(client.getClient().getConfig().getSimpleAuth().orElseThrow().getPassword())
+                .hasValueSatisfying(buffer -> assertThat(toBytes(buffer)).isEqualTo("secret".getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private HiveMQEndpoint createEndpoint(HiveMQConfiguration configuration) {
+        return new HiveMQEndpoint("hivemq:test", component, configuration, "test");
+    }
+
+    private static byte[] toBytes(ByteBuffer buffer) {
+        byte[] bytes = new byte[buffer.remaining()];
+        buffer.get(bytes);
+        return bytes;
     }
 }
