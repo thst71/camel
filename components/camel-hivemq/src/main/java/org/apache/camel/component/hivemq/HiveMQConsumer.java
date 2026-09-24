@@ -20,8 +20,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import com.hivemq.client.mqtt.mqtt5.Mqtt5AsyncClient;
-import com.hivemq.client.mqtt.mqtt5.message.publish.Mqtt5Publish;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.apache.camel.support.DefaultConsumer;
@@ -32,7 +30,7 @@ public class HiveMQConsumer extends DefaultConsumer {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveMQConsumer.class);
     private final HiveMQEndpoint endpoint;
-    private Mqtt5AsyncClient client;
+    private HiveMQClientAdapter client;
     private ExecutorService executor;
 
     public HiveMQConsumer(HiveMQEndpoint endpoint, Processor processor) {
@@ -47,27 +45,25 @@ public class HiveMQConsumer extends DefaultConsumer {
         client = endpoint.createClient();
         endpoint.connect(client);
 
-        client.subscribeWith()
-                .topicFilter(endpoint.getTopic())
-                .qos(endpoint.getConfiguration().getQos())
-                .callback(this::onMessage)
-                .send()
+        client.subscribe(endpoint.getTopic(), endpoint.getConfiguration().getQos(), this::onMessage)
                 .orTimeout(HiveMQConstants.DEFAULT_CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .join();
     }
 
     @Override
     protected void doStop() throws Exception {
-        if (client != null && client.getState().isConnected()) {
+        if (client != null && client.isConnected()) {
             try {
-                client.unsubscribeWith().topicFilter(endpoint.getTopic()).send()
+                client.unsubscribe(endpoint.getTopic())
                         .orTimeout(5, TimeUnit.SECONDS).join();
             } catch (Exception e) {
                 // Best-effort unsubscribe before cancelling reconnect / disconnect
                 LOG.debug("Failed to unsubscribe from topic {} during shutdown", endpoint.getTopic(), e);
             }
         }
-        endpoint.stopClient(client);
+        if (client != null) {
+            client.stop();
+        }
         client = null;
         if (executor != null) {
             endpoint.getCamelContext().getExecutorServiceManager().shutdownNow(executor);
@@ -76,12 +72,12 @@ public class HiveMQConsumer extends DefaultConsumer {
         super.doStop();
     }
 
-    private void onMessage(Mqtt5Publish publish) {
+    private void onMessage(HiveMQMessage message) {
         Exchange exchange = createExchange(false);
-        exchange.getIn().setBody(publish.getPayloadAsBytes());
-        exchange.getIn().setHeader(HiveMQConstants.MQTT_TOPIC, publish.getTopic().toString());
-        exchange.getIn().setHeader(HiveMQConstants.MQTT_QOS, publish.getQos());
-        exchange.getIn().setHeader(HiveMQConstants.MQTT_RETAINED, publish.isRetain());
+        exchange.getIn().setBody(message.payload());
+        exchange.getIn().setHeader(HiveMQConstants.MQTT_TOPIC, message.topic());
+        exchange.getIn().setHeader(HiveMQConstants.MQTT_QOS, message.qos());
+        exchange.getIn().setHeader(HiveMQConstants.MQTT_RETAINED, message.retained());
 
         ExecutorService worker = executor;
         if (worker == null) {
